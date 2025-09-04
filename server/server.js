@@ -27,7 +27,7 @@ app.post('/clerk',express.json(),clerkWebhooks)
 app.use('/api/educator',express.json(),educatorRouter)
 app.use('/api/course',express.json(),courseRouter);
 app.use('/api/user',express.json(),userRouter)
-app.post('/stripe',bodyParser.raw({type:'application/json'}),(req,res,next)=>{
+app.post('/stripe',express.raw({type:'application/json'}),(req,res,next)=>{
     console.log("antrikshya nigga")
     next()
 },stripeWebhooks);
