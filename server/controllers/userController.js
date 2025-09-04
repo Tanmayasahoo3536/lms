@@ -1,126 +1,131 @@
-import Stripe from "stripe";
-import Purchase  from "../models/Purchase.js";
+import { Webhook } from "svix";
 import User from "../models/User.js";
-import jwt from "jsonwebtoken";
+import Stripe from "stripe";
+import Purchase from "../models/Purchase.js";
 import Course from "../models/Course.js";
 
-// get user data
-export const getUserData = async (req, res) => {
-    try {
-        // const userId = req.auth.userId;
-        const authToken=req.headers.authorization
-        // console.log(header)
-        const token = authToken.split(" ")[1];
-        if (!token) {
-              return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
+//API controller Function to manage clerk user with database
+
+export const clerkWebhooks = async(req,res)=> {
+    try{
+        const whook= new Webhook(process.env.CLERK_WEBHOOK_SECRET)
+
+        await whook.verify(JSON.stringify(req.body),{
+            "svix-id": req.headers["svix-id"],
+            "svix-timestamp": req.headers["svix-timestamp"],
+            "svix-signature": req.headers["svix-signature"]
+        })
+
+        const{data,type} = req.body
+        switch (type) {
+            case 'user.created':{
+                const userData = {
+                    _id: data.id,
+                    email: data.email_addresses[0].email_address,
+                    name: data.first_name + " " + data.last_name,
+                    imageUrl: data.image_url,
+                }
+                await User.create(userData)
+                res.json({})
+                break;
             }
-            const decodedtoken = jwt.decode(token);
-            const userId = decodedtoken.sub;
-            console.log(userId)
-            const user = await User.findById(userId);
+                
+            case 'user.updated':{
+                const userData = {
+                    email: data.email_addresses[0].email_address,
+                    name: data.first_name + " " + data.last_name,
+                    imageUrl: data.image_url,
+                }
+                await User.findByIdAndUpdate(data.id, userData)
+                res.json({})
+                break;
+            }
 
-        if (!user) {
-      return res.json({ success: false, message: "user not found" });
-    }
-
-    res.json({ success: true, user });
-
+            case 'user.deleted' :{
+                await User.findByIdAndDelete(data.id)
+                res.json({})
+                break;
+            }
+        
+            default:
+                break;
+        }
     } catch (error) {
-        res.json({ success: false, message: error.message });
+        res.status(503).json({success: false, message:error.message})
     }
 }
 
-// fn to get userEnrolled Courses with lecture Link
 
-export const userEnrolledCourses = async (req, res) => {
+//  fn to handle stripe webhooks
+const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+export const stripeWebhooks = async (req, res) => {
+  console.log("yaha tak");
+  const sig = req.headers['stripe-signature'];
+
+  let event;
+
   try {
-        const authToken=req.headers.authorization
-        const token = authToken.split(" ")[1];
-        // const userId = req.auth.userId;
-        if (!token) {
-              return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
-            }
-            const decodedtoken = jwt.decode(token);
-            const userId = decodedtoken.sub;
-            const userData = await User.findById(userId).populate("enrolledCourses");
-
-    return res.json({
-      success: true,
-      enrolledCourses: userData.enrolledCourses,
-    });
-  } catch (error) {
-    res.json({ success: false, message: error.message });
+    event = stripeInstance.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   }
-};
+  catch (err) {
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
 
+  // Handle the event
+  switch (event.type) {
+    case 'payment_intent.succeeded':{
+      const paymentIntent = event.data.object;
 
+      const paymentIntentId = paymentIntent.id;
 
-export const purchaseCourse = async (req, res) => {
-    try {
-      console.log(req.body)
-        const { courseId } = req.body;
-        const { origin } = req.headers;
-        // const userId = req.auth.userId;
-        const authToken = req.headers.authorization;
-            const token = authToken.split(" ")[1];
-            if (!token) {
-              return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
-            }
-            const decodedtoken = jwt.decode(token);
-            const userId = decodedtoken.sub;
-            console.log(userId);
-        const userData = await User.findById(userId);
-        const courseData = await Course.findById(courseId);
+      const session = await stripeInstance.checkout.sessions.list({
+        payment_intent: paymentIntentId,
+      });
 
-        if (!userData || !courseData) {
-      return res.json({ success: false, message: "data not found" });
-        }
+      const { purchaseId } = session.data[0].metadata;
 
-        const purchaseData = {
-      courseId: courseData._id,
-      userId,
-      amount: (
-        courseData.coursePrice -
-        (courseData.discount * courseData.coursePrice) / 100
-      ).toFixed(2),
-    };
+      const purchaseData = await Purchase.findById(purchaseId);
+      const userData = await User.findById(purchaseData.userId);
+      const courseData = await Course.findById(
+        purchaseData.courseId.toString()
+      );
 
-    const newPurchase = await Purchase.create(purchaseData);
+      courseData.enrolledStudents.push(userData);
+      await courseData.save();
 
-    // stripe gateway initialise
-    const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
+      userData.enrolledCourses.push(courseData._id);
+      await userData.save();
 
-    const currency = process.env.CURRENCY.toLowerCase();
-    // const currency = "usd";
+      purchaseData.status = "completed";
+      await purchaseData.save();
 
-    // CREATING LINE ITEMS FOR STRIPE
-    const line_items = [
-      {
-        price_data: {
-          currency,
-          product_data: {
-            name: courseData.courseTitle,
-          },
-          unit_amount: Math.floor(newPurchase.amount) * 100,
-        },
-
-        quantity: 1,
-      },
-    ];
-
-    const session = await stripeInstance.checkout.sessions.create({
-      success_url: `${origin}/loading/my-enrollments`,
-      cancel_url: `${origin}/`,
-      line_items: line_items,
-      mode: "payment",
-      metadata: {
-        purchaseId: newPurchase._id.toString(),
-      },
-    });
-
-    res.json({ success: true, session_url: session.url });
-
-    } catch (error) {
-        res.json({ success: false, message: error.message });
+      break;
     }
+
+
+    case 'payment_intent.payment_failed':{
+      const paymentIntent = event.data.object;
+
+      const paymentIntentId = paymentIntent.id;
+
+      const session = await stripeInstance.checkout.sessions.list({
+        payment_intent: paymentIntentId,
+      });
+
+      const { purchaseId } = session.data[0].metadata;
+      const purchaseData = await Purchase.findById(purchaseId);
+
+      purchaseData.status = "failed";
+      await purchaseData.save();
+
+      break;
+    }
+    // ... handle other event types
+    default:
+      console.log(`Unhandled event type ${event.type}`);
+  }
+
+  // Return a response to acknowledge receipt of the event
+  res.json({ received: true });
 }
