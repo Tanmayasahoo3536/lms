@@ -8,7 +8,15 @@ import User from "../models/User.js";
 //update role to educator
 export const updateRoleToEducator = async (req, res) => {
   try {
-    const userId = req.auth.userId;
+    // const userId = req.auth.userId;
+
+    const authToken = req.headers.authorization;
+    const token = authToken.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
+    }
+    const decodedtoken = jwt.decode(token);
+    const userId = decodedtoken.sub;
 
     await clerkClient.users.updateUserMetadata(userId, {
       publicMetadata: {
@@ -35,7 +43,6 @@ export const addCourse = async (req, res) => {
     }
     const decodedtoken = jwt.decode(token);
     const educatorId = decodedtoken.sub;
-    console.log(educatorId);
 
     if (!imageFile) {
       return res.json({ success: false, message: "Thumbnail not attached" });
