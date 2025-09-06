@@ -1,6 +1,8 @@
 import React, { useContext, useEffect, useState } from 'react'
 import Loading from '../../components/student/Loading';
 import { AppContext } from '../../context/AppContext';
+import { toast } from 'react-toastify';
+import axios from 'axios';
 
 const MyCourses = () => {
 
@@ -9,12 +11,28 @@ const MyCourses = () => {
   const [courses, setCourses] = useState(null);
 
   const fetchEducatorCourses = async () => {
-    setCourses(allCourses)
+    try {
+      const token = await getToken();
+
+      const { data } = await axios.get(backendUrl + "/api/educator/courses", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      console.log(data);
+
+      if (data.success) {
+        setCourses(data.courses);
+      }
+    } catch (error) {
+      toast.error(error.message);
+    }
   };
 
   useEffect(() => {
+    if (isEducator) {
       fetchEducatorCourses();
-  }, []);
+    }
+  }, [isEducator]);
 
 
   return courses ? (
