@@ -3,7 +3,7 @@ import Course from "../models/Course.js";
 import Purchase from "../models/Purchase.js";
 import User from "../models/User.js";
 import CourseProgress from "../models/CourseProgress.js";
-
+import jwt from "jsonwebtoken";
 
 
 
@@ -13,7 +13,15 @@ import CourseProgress from "../models/CourseProgress.js";
 
 export const getUserData = async (req, res) => {
   try {
-    const userId = req.auth.userId;
+    // const userId = req.auth.userId;
+
+    const authToken = req.headers.authorization;
+    const token = authToken.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
+    }
+    const decodedtoken = jwt.decode(token);
+    const userId = decodedtoken.sub;
     const user = await User.findById(userId);
 
     if (!user) {
@@ -37,7 +45,15 @@ export const getUserData = async (req, res) => {
 
 export const userEnrolledCourses = async (req, res) => {
   try {
-    const userId = req.auth.userId;
+    // const userId = req.auth.userId;
+
+    const authToken = req.headers.authorization;
+    const token = authToken.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
+    }
+    const decodedtoken = jwt.decode(token);
+    const userId = decodedtoken.sub;
     const userData = await User.findById(userId).populate("enrolledCourses");
 
     return res.json({
@@ -63,7 +79,16 @@ export const purchaseCourse = async (req, res) => {
     const { courseId } = req.body;
 
     const { origin } = req.headers;
-    const userId = req.auth.userId;
+    // const userId = req.auth.userId;
+
+    const authToken = req.headers.authorization;
+    const token = authToken.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
+    }
+    const decodedtoken = jwt.decode(token);
+    const userId = decodedtoken.sub;
+
     const userData = await User.findById(userId);
     const courseData = await Course.findById(courseId);
 
@@ -130,7 +155,15 @@ export const purchaseCourse = async (req, res) => {
 
 export const updateUserCourseProgress = async (req, res) => {
   try {
-    const userId = req.auth.userId;
+    // const userId = req.auth.userId;
+
+    const authToken = req.headers.authorization;
+    const token = authToken.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
+    }
+    const decodedtoken = jwt.decode(token);
+    const userId = decodedtoken.sub;
     const { courseId, lectureId } = req.body;
     const progressData = await CourseProgress.findOne({ userId, courseId });
 
@@ -167,7 +200,16 @@ export const updateUserCourseProgress = async (req, res) => {
 
 export const getUserCourseProgress = async (req, res) => {
   try {
-    const userId = req.auth.userId;
+    // const userId = req.auth.userId;
+
+    const authToken = req.headers.authorization;
+    const token = authToken.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
+    }
+    const decodedtoken = jwt.decode(token);
+    const userId = decodedtoken.sub;
+    
     const { courseId } = req.body;
     const progressData = await CourseProgress.findOne({ userId, courseId });
 
@@ -183,7 +225,16 @@ export const getUserCourseProgress = async (req, res) => {
 // Add user Rating to Course
 
 export const addUserRating = async (req, res) => {
-  const userId = req.auth.userId;
+  // const userId = req.auth.userId;
+
+    const authToken = req.headers.authorization;
+    const token = authToken.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
+    }
+    const decodedtoken = jwt.decode(token);
+    const userId = decodedtoken.sub;
+    
   const { courseId, rating } = req.body;
 
   if (!courseId || !userId || !rating || rating < 1 || rating > 5) {

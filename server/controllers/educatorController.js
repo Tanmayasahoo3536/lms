@@ -149,7 +149,16 @@ export const educatorDashboardData = async (req, res) => {
 // Get Enrolled Students Data with purchase Data
 export const getEnrolledStudentsData = async (req, res) => {
     try {
-        const educator = req.auth.userId;
+
+      // const userId = req.auth.userId;
+
+      const authToken = req.headers.authorization;
+      const token = authToken.split(" ")[1];
+      if (!token) {
+        return res.status(401).json({ success: false, message: "Unauthorized: No token provided" });
+      }
+      const decodedtoken = jwt.decode(token);
+      const educator = decodedtoken.sub;
         const courses = await Course.find({ educator });
         const courseIds = courses.map((course) => course._id);
 
