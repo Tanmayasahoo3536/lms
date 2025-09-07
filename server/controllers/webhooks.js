@@ -109,60 +109,99 @@ export const stripeWebhooks = async (req, res) => {
   let event;
 
   try {
+    // ✅ (CHANGE 1) Keep req.body raw (you already used express.raw in server.js)
     event = stripeInstance.webhooks.constructEvent(
       req.body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
-    console.log("Stripe Event:", event.type);
+    console.log("✅ Stripe Event Received:", event.type);
   } catch (err) {
-    console.error("Webhook signature verification failed:", err.message);
+    console.error("❌ Webhook signature verification failed:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  switch (event.type) {
-    case "checkout.session.completed": {
-      const session = event.data.object;
-      const { purchaseId } = session.metadata;
+  try {
+    switch (event.type) {
+      case "checkout.session.completed": {
+        // ✅ (CHANGE 2) Added safety + logs
+        const session = event.data.object;
+        console.log("💳 Checkout session completed:", session.id, session.metadata);
 
-      const purchaseData = await Purchase.findById(purchaseId);
-      if (!purchaseData) break;
+        const { purchaseId } = session.metadata || {};
+        if (!purchaseId) {
+          console.error("⚠️ Missing purchaseId in session metadata");
+          break;
+        }
 
-      const userData = await User.findById(purchaseData.userId);
-      const courseData = await Course.findById(purchaseData.courseId);
+        const purchaseData = await Purchase.findById(purchaseId);
+        if (!purchaseData) {
+          console.error("⚠️ Purchase not found in DB:", purchaseId);
+          break;
+        }
 
-      if (userData && courseData) {
-        // update enrolled students + user courses
-        courseData.enrolledStudents.push(userData._id);
-        await courseData.save();
+        const userData = await User.findById(purchaseData.userId);
+        const courseData = await Course.findById(purchaseData.courseId);
 
-        userData.enrolledCourses.push(courseData._id);
-        await userData.save();
-      }
+        if (userData && courseData) {
+          // ✅ (CHANGE 3) Prevent duplicate pushes
+          if (!courseData.enrolledStudents.includes(userData._id)) {
+            courseData.enrolledStudents.push(userData._id);
+            await courseData.save();
+          }
 
-      // update purchase status
-      purchaseData.status = "completed";
-      await purchaseData.save();
+          if (!userData.enrolledCourses.includes(courseData._id)) {
+            userData.enrolledCourses.push(courseData._id);
+            await userData.save();
+          }
+        }
 
-      break;
-    }
-
-    case "checkout.session.async_payment_failed": {
-      const session = event.data.object;
-      const { purchaseId } = session.metadata;
-
-      const purchaseData = await Purchase.findById(purchaseId);
-      if (purchaseData) {
-        purchaseData.status = "failed";
+        purchaseData.status = "completed";
         await purchaseData.save();
+        console.log("✅ Purchase marked completed:", purchaseId);
+        break;
       }
 
-      break;
+      case "checkout.session.async_payment_failed": {
+        const session = event.data.object;
+        console.log("❌ Payment async failed:", session.id);
+
+        const { purchaseId } = session.metadata || {};
+        if (purchaseId) {
+          const purchaseData = await Purchase.findById(purchaseId);
+          if (purchaseData) {
+            purchaseData.status = "failed";
+            await purchaseData.save();
+            console.log("⚠️ Purchase marked failed:", purchaseId);
+          }
+        }
+        break;
+      }
+
+      // ✅ (CHANGE 4) Handle payment_intent.succeeded (some setups trigger this instead)
+      case "payment_intent.succeeded": {
+        const intent = event.data.object;
+        console.log("✅ Payment Intent succeeded:", intent.id, intent.metadata);
+
+        const { purchaseId } = intent.metadata || {};
+        if (purchaseId) {
+          const purchaseData = await Purchase.findById(purchaseId);
+          if (purchaseData) {
+            purchaseData.status = "completed";
+            await purchaseData.save();
+            console.log("✅ Purchase marked completed (from intent):", purchaseId);
+          }
+        }
+        break;
+      }
+
+      default:
+        console.log(`ℹ️ Unhandled event type: ${event.type}`);
     }
 
-    default:
-      console.log(`Unhandled event type ${event.type}`);
+    res.json({ received: true });
+  } catch (error) {
+    console.error("❌ Error processing webhook:", error.message);
+    res.status(500).json({ success: false, message: error.message });
   }
-
-  res.json({ received: true });
 };
